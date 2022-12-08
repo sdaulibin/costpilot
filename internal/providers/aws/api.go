@@ -234,10 +234,7 @@ func IsValidMonth(month string) bool {
 	return true
 }
 func (p *AWSCloud) DescribeRegions(ctx context.Context, param types.DescribeRegionsRequest) (types.DescribeRegions, error) {
-	allRegion := false
-	input := &ec2.DescribeRegionsInput{
-		AllRegions: &allRegion,
-	}
+	input := &ec2.DescribeRegionsInput{}
 	response, err := p.ec2Client.DescribeRegions(ctx, input)
 	if err != nil {
 		if aerr, ok := err.(awserr.Error); ok {
@@ -248,18 +245,19 @@ func (p *AWSCloud) DescribeRegions(ctx context.Context, param types.DescribeRegi
 		} else {
 			log.Println(err.Error())
 		}
+		return types.DescribeRegions{}, err
 	}
 	if response.Regions != nil {
-		result := make([]types.ItemRegion, 0, len(response.Regions))
+		itemRegions := make([]types.ItemRegion, 0, len(response.Regions))
 		for _, regin := range response.Regions {
 			newRegion := types.ItemRegion{
 				RegionId:  aws.StringValue(regin.RegionName),
 				LocalName: _regionLocalName[aws.StringValue(regin.RegionName)],
 			}
-			result = append(result, newRegion)
+			itemRegions = append(itemRegions, newRegion)
 		}
 		return types.DescribeRegions{
-			List: result,
+			List: itemRegions,
 		}, err
 	}
 	return types.DescribeRegions{}, err
@@ -334,10 +332,8 @@ func convDescribeInstances(reservations []ec2Types.Reservation, reservedInstance
 				RegionId:         aws.StringValue(instance.Placement.AvailabilityZone),
 				RegionName:       _regionLocalName[region[0:len(region)-1]],
 				SubscriptionType: subscriptionType,
-				/*HostName:           "",
-				InternetChargeType: "",*/
-				PublicIpAddress: []string{aws.StringValue(instance.PublicIpAddress)},
-				InnerIpAddress:  []string{aws.StringValue(instance.PrivateIpAddress)},
+				PublicIpAddress:  []string{aws.StringValue(instance.PublicIpAddress)},
+				InnerIpAddress:   []string{aws.StringValue(instance.PrivateIpAddress)},
 			}
 			awsInstances = append(awsInstances, newInstance)
 		}
