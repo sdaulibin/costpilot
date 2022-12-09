@@ -7,7 +7,10 @@ import (
 	"log"
 	"strconv"
 	"time"
-
+  
+	cloudwatchType "github.com/aws/aws-sdk-go-v2/service/cloudwatch/types"
+	ec2Types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
+	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/alibabacloud-go/tea/tea"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
