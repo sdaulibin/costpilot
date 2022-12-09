@@ -4,24 +4,24 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	cloudwatchType "github.com/aws/aws-sdk-go-v2/service/cloudwatch/types"
-	"github.com/aws/aws-sdk-go/aws/awserr"
 	"log"
 	"strconv"
 	"time"
 
 	"github.com/alibabacloud-go/tea/tea"
-	"github.com/aws/aws-sdk-go-v2/service/cloudwatch"
-	"github.com/aws/aws-sdk-go-v2/service/ec2"
-	"github.com/galaxy-future/costpilot/tools"
-
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/cloudwatch"
+	cloudwatchType "github.com/aws/aws-sdk-go-v2/service/cloudwatch/types"
 	"github.com/aws/aws-sdk-go-v2/service/costexplorer"
 	explorerTypes "github.com/aws/aws-sdk-go-v2/service/costexplorer/types"
+	"github.com/aws/aws-sdk-go-v2/service/ec2"
+	ec2Types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/galaxy-future/costpilot/internal/constants/cloud"
 	"github.com/galaxy-future/costpilot/internal/providers/types"
+	"github.com/galaxy-future/costpilot/tools"
 )
 
 type AWSCloud struct {
@@ -233,10 +233,7 @@ func IsValidMonth(month string) bool {
 	return true
 }
 func (p *AWSCloud) DescribeRegions(ctx context.Context, param types.DescribeRegionsRequest) (types.DescribeRegions, error) {
-	allRegion := false
-	input := &ec2.DescribeRegionsInput{
-		AllRegions: &allRegion,
-	}
+	input := &ec2.DescribeRegionsInput{}
 	response, err := p.ec2Client.DescribeRegions(ctx, input)
 	if err != nil {
 		if aerr, ok := err.(awserr.Error); ok {
@@ -247,30 +244,29 @@ func (p *AWSCloud) DescribeRegions(ctx context.Context, param types.DescribeRegi
 		} else {
 			log.Println(err.Error())
 		}
+		return types.DescribeRegions{}, err
 	}
 	if response.Regions != nil {
-		result := make([]types.ItemRegion, 0, len(response.Regions))
+		itemRegions := make([]types.ItemRegion, 0, len(response.Regions))
 		for _, regin := range response.Regions {
 			newRegion := types.ItemRegion{
 				RegionId:  aws.StringValue(regin.RegionName),
 				LocalName: _regionLocalName[aws.StringValue(regin.RegionName)],
 			}
-			result = append(result, newRegion)
+			itemRegions = append(itemRegions, newRegion)
 		}
 		return types.DescribeRegions{
-			List: result,
+			List: itemRegions,
 		}, err
 	}
 	return types.DescribeRegions{}, err
 }
 
 func (p *AWSCloud) DescribeInstances(ctx context.Context, param types.DescribeInstancesRequest) (types.DescribeInstances, error) {
-	awsInstances := make([]types.ItemDescribeInstance, 0)
 	input := &ec2.DescribeInstancesInput{
 		InstanceIds: param.InstanceIds,
 	}
 	output, err := p.ec2Client.DescribeInstances(ctx, input)
-	log.Println(output.Reservations)
 	if err != nil {
 		if aerr, ok := err.(awserr.Error); ok {
 			switch aerr.Code() {
@@ -282,30 +278,71 @@ func (p *AWSCloud) DescribeInstances(ctx context.Context, param types.DescribeIn
 		}
 	}
 	if output.Reservations != nil {
-		for _, reservation := range output.Reservations {
-			for _, instance := range reservation.Instances {
-				region := aws.StringValue(instance.Placement.AvailabilityZone)
-				newInstance := types.ItemDescribeInstance{
-					InstanceId:   aws.StringValue(instance.InstanceId),
-					InstanceName: aws.StringValue(instance.Tags[0].Value),
-					RegionId:     aws.StringValue(instance.Placement.AvailabilityZone),
-					RegionName:   _regionLocalName[region[0:len(region)-1]],
-					/*HostName:           "",
-					SubscriptionType:   "",
-					InternetChargeType: "",*/
-					PublicIpAddress: []string{aws.StringValue(instance.PublicIpAddress)},
-					InnerIpAddress:  []string{aws.StringValue(instance.PrivateIpAddress)},
-				}
-				awsInstances = append(awsInstances, newInstance)
-			}
+		reservedInstances, err1 := p.describeReservedInstances(ctx)
+		if err1 != nil {
+			log.Println(err1.Error())
+			return types.DescribeInstances{}, err1
 		}
-		return types.DescribeInstances{
-			TotalCount: len(awsInstances),
-			List:       awsInstances,
-		}, err
+		return convDescribeInstances(output.Reservations, reservedInstances), err
 	}
 	return types.DescribeInstances{}, err
 }
+
+// Get Reserved Instances
+func (p *AWSCloud) describeReservedInstances(ctx context.Context) (map[string]string, error) {
+	reservedInstances := make(map[string]string, 0)
+	output, err := p.ec2Client.DescribeReservedInstances(ctx, &ec2.DescribeReservedInstancesInput{})
+	if err != nil {
+		if aerr, ok := err.(awserr.Error); ok {
+			switch aerr.Code() {
+			default:
+				log.Println(aerr.Error())
+			}
+		} else {
+			log.Println(err.Error())
+		}
+		return reservedInstances, err
+	}
+	if output.ReservedInstances != nil {
+		for _, reservation := range output.ReservedInstances {
+			if ec2Types.ReservedInstanceStateActive == reservation.State {
+				reservedInstances[aws.StringValue(reservation.ReservedInstancesId)] = string(reservation.InstanceType)
+			}
+		}
+	}
+	return reservedInstances, err
+}
+
+func convDescribeInstances(reservations []ec2Types.Reservation, reservedInstances map[string]string) types.DescribeInstances {
+	awsInstances := make([]types.ItemDescribeInstance, 0)
+	for _, reservation := range reservations {
+		for _, instance := range reservation.Instances {
+			region := aws.StringValue(instance.Placement.AvailabilityZone)
+			subscriptionType := cloud.PostPaid
+			for k, v := range reservedInstances {
+				if string(instance.InstanceType) == v {
+					subscriptionType = cloud.PrePaid
+					delete(reservedInstances, k)
+				}
+			}
+			newInstance := types.ItemDescribeInstance{
+				InstanceId:       aws.StringValue(instance.InstanceId),
+				InstanceName:     aws.StringValue(instance.Tags[0].Value),
+				RegionId:         aws.StringValue(instance.Placement.AvailabilityZone),
+				RegionName:       _regionLocalName[region[0:len(region)-1]],
+				SubscriptionType: subscriptionType,
+				PublicIpAddress:  []string{aws.StringValue(instance.PublicIpAddress)},
+				InnerIpAddress:   []string{aws.StringValue(instance.PrivateIpAddress)},
+			}
+			awsInstances = append(awsInstances, newInstance)
+		}
+	}
+	return types.DescribeInstances{
+		TotalCount: len(awsInstances),
+		List:       awsInstances,
+	}
+}
+
 func convDescribeMetricListRequest(param types.DescribeMetricListRequest) (*cloudwatch.GetMetricDataInput, map[string]string) {
 	ids := make(map[string]string)
 	metricDataQueries := []cloudwatchType.MetricDataQuery{}

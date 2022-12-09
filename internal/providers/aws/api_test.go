@@ -2,17 +2,17 @@ package aws
 
 import (
 	"context"
-	"github.com/stretchr/testify/assert"
 	"reflect"
 	"testing"
 	"time"
 
 	"github.com/galaxy-future/costpilot/internal/providers/types"
+	"github.com/stretchr/testify/assert"
 )
 
 var (
-	_AK = "AKIAVQEXEYXU5XTWSWQ6"
-	_SK = "emFXxL0GMIIgxHVANMk5m+exUS7w6pWWL1EhumMf"
+	_AK = ""
+	_SK = ""
 	cli *AWSCloud
 )
 
@@ -29,7 +29,7 @@ func TestAWSCloud_QueryAccountBill(t *testing.T) {
 		ctx   context.Context
 		param types.QueryAccountBillRequest
 	}
-	awsCloud, err := New(_AK, _SK, "cn-north-1")
+	awsCloud, err := New(_AK, _SK, "ap-northeast-1")
 	if err != nil {
 		t.Errorf("AWSCloud.New error=%v", err)
 	}
@@ -119,7 +119,7 @@ func TestAWSCloud_DescribeRegions(t *testing.T) {
 
 func TestAWSCloud_DescribeInstances(t *testing.T) {
 	instances, err := cli.DescribeInstances(context.Background(), types.DescribeInstancesRequest{
-		InstanceIds: []string{"i-09491347f48116001"},
+		// InstanceIds: []string{"i-09491347f48116001"},
 	})
 	t.Log(instances)
 	t.Log(err)
